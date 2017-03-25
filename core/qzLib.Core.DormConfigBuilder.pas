@@ -3,12 +3,18 @@ unit qzLib.Core.DormConfigBuilder;
 interface
 
 uses
-  System.Classes, System.JSON.Builders, System.JSON.Writers, System.JSON.Types;
+  System.Classes, System.JSON.Builders, System.JSON.Writers, System.JSON.Types,
+  dorm.Commons;
 
 type
+  TDormLogger = (dlDummy, dlCodeSiteFile, dlCodeSiteLive, dlFile, dlSmartInspect);
+
   IDormConfigBuilder = interface
     ['{13A4EF3B-3DF6-4B01-97ED-338F5D1156C5}']
+    function GetLogger(Index: TdormEnvironment): TDormLogger;
+    procedure SetLogger(Index: TdormEnvironment; Value: TDormLogger);
     function BuildConfig: String;
+    property Logger[Index: TdormEnvironment]: TDormLogger read GetLogger write SetLogger;
   end;
 
   TAbstractDormConfigBuilder = class(TInterfacedObject, IDormConfigBuilder)
@@ -16,8 +22,10 @@ type
     FDatabaseConnection: String;
     FUsername: String;
     FPassword: String;
+    FLoggers: Array[TdormEnvironment] of TDormLogger;
     procedure WriteSectionValues(const AWriter: TJsonTextWriter;
-      const AObjectName: String);
+      const AEnvironment: TdormEnvironment);
+    function GetLoggerValue(const AEnvironment: TdormEnvironment): String;
   protected
     property DatabaseConnection: String read FDatabaseConnection;
     function GetUsername: String; virtual;
@@ -27,10 +35,13 @@ type
     function GetHasLogin: Boolean; virtual; abstract;
     function GetHasKeysGenerator: Boolean; virtual; abstract;
     function GetKeysGenerator: String; virtual;
+    function GetLogger(Index: TdormEnvironment): TDormLogger;
+    procedure SetLogger(Index: TdormEnvironment; Value: TDormLogger);
   public
     constructor Create(const ADatabaseConnection: String); overload; virtual;
     constructor Create(const ADatabaseConnection, AUsername, APassword: String); overload; virtual;
     function BuildConfig: String;
+    property Logger[Index: TdormEnvironment]: TDormLogger read GetLogger write SetLogger;
   end;
 
   TDormSQLiteConfigBuilder = class(TAbstractDormConfigBuilder)
@@ -47,7 +58,7 @@ type
     function GetHasKeysGenerator: Boolean; override;
     function GetKeysGenerator: String; override;
   public
-    constructor Create(const ADatabaseConnection: String); overload; virtual;
+    constructor Create(const ADatabaseConnection: String); override;
   end;
 
 implementation
@@ -63,6 +74,9 @@ end;
 constructor TAbstractDormConfigBuilder.Create(const ADatabaseConnection,
   AUsername, APassword: String);
 begin
+  FLoggers[deDevelopment] := dlDummy;
+  FLoggers[deTest] := dlDummy;
+  FLoggers[deRelease] := dlDummy;
   FDatabaseConnection := ADatabaseConnection;
   FUsername := AUsername;
   FPassword := APassword;
@@ -78,9 +92,34 @@ begin
   Result := '';
 end;
 
+function TAbstractDormConfigBuilder.GetLogger(
+  Index: TdormEnvironment): TDormLogger;
+begin
+  Result := FLoggers[Index];
+end;
+
+function TAbstractDormConfigBuilder.GetLoggerValue(
+  const AEnvironment: TdormEnvironment): String;
+const
+  LoggerValues: array[TDormLogger] of string = (
+    'qzLib.Core.DormLoggers.TdormDummyLogger',
+    'dorm.loggers.CodeSite.TCodeSiteFileLog',
+    'dorm.loggers.CodeSite.TCodeSiteLiveLog',
+    'dorm.loggers.FileLog.TdormFileLog',
+    'dorm.loggers.SmartInspect.TdormSILog');
+begin
+  Result := LoggerValues[FLoggers[AEnvironment]];
+end;
+
 function TAbstractDormConfigBuilder.GetUsername: String;
 begin
   Result := FUsername;
+end;
+
+procedure TAbstractDormConfigBuilder.SetLogger(Index: TdormEnvironment;
+  Value: TDormLogger);
+begin
+  FLoggers[Index] := Value;
 end;
 
 function TAbstractDormConfigBuilder.GetPassword: String;
@@ -103,9 +142,9 @@ begin
       Writer.WritePropertyName('persistence');
 
       Writer.WriteStartObject;
-      WriteSectionValues(Writer, 'development');
-      WriteSectionValues(Writer, 'test');
-      WriteSectionValues(Writer, 'release');
+      WriteSectionValues(Writer, deDevelopment);
+      WriteSectionValues(Writer, deTest);
+      WriteSectionValues(Writer, deRelease);
       Writer.WriteEndObject;
 
       Writer.WriteEndObject;
@@ -120,9 +159,12 @@ begin
 end;
 
 procedure TAbstractDormConfigBuilder.WriteSectionValues(
-  const AWriter: TJsonTextWriter; const AObjectName: String);
+  const AWriter: TJsonTextWriter; const AEnvironment: TdormEnvironment);
+const
+  EnvironmentNames: Array[TdormEnvironment] of String = (
+    'development', 'test', 'release');
 begin
-  AWriter.WritePropertyName(AObjectName);
+  AWriter.WritePropertyName(EnvironmentNames[AEnvironment]);
   AWriter.WriteStartObject;
 
   AWriter.WritePropertyName('database_adapter');
@@ -135,7 +177,7 @@ begin
   AWriter.WriteValue('integer');
 
   AWriter.WritePropertyName('logger_class_name');
-  AWriter.WriteValue('dorm.loggers.FileLog.TdormFileLog');
+  AWriter.WriteValue(GetLoggerValue(AEnvironment));
 
   if GetHasKeysGenerator then
     begin

@@ -63,6 +63,9 @@ type
 
 implementation
 
+uses
+  qzLib.Core.DormLoggers;
+
 { TAbstractDormConfigBuilder }
 
 constructor TAbstractDormConfigBuilder.Create(
